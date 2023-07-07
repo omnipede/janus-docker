@@ -1,0 +1,135 @@
+<html lang="">
+<body>
+    <div class="container">
+        <h1>Janus echo test</h1>
+        <ul style="display: table-row">
+            <li style="display: table-cell">
+                <div id="videoleft"></div>
+            </li>
+            <li style="display: table-cell">
+                <div id="videoright"></div>
+            </li>
+        </ul>
+    </div>
+</body>
+<script type="text/javascript" src="janus.js" ></script>
+<script type="text/javascript" src="https://cdnjs.cloudflare.com/ajax/libs/webrtc-adapter/8.2.2/adapter.min.js"></script>
+<script type="text/javascript" src="https://cdnjs.cloudflare.com/ajax/libs/jquery/3.7.0/jquery.min.js"></script>
+<script type="text/javascript">
+
+    $(document).ready(onDocumentReady)
+    function onDocumentReady() {
+        Janus.init({
+            debug: 'all',
+            callback: onInit
+        })
+    }
+
+    let janus = null;
+    function onInit() {
+        // Create session
+        janus = new Janus({
+            server: 'http://localhost:8088/janus',
+            iceServers: [{urls: "stun:stun.l.google.com:19302"}],
+            success: onSessionCreated,
+            error: function (error) {
+                Janus.error(error)
+            }
+        })
+    }
+
+    function onSessionCreated() {
+        // Attach to plugin
+        janus.attach({
+            plugin: "janus.plugin.echotest",
+            success: onPluginCreated,
+            onmessage: onMessage,
+            onlocaltrack: onLocalTrack,
+            onremotetrack: onRemoteTrack,
+        })
+    }
+
+    let echotest = null;
+    function onPluginCreated(pluginHandle) {
+        echotest = pluginHandle
+        const body = {
+            audio: true,
+            video: true,
+        }
+
+        // Send message to plugin
+        echotest.send({
+            message: body
+        })
+
+        // Create offer via SDF message
+        // TODO UI 가다듬기
+        // TODO audio 붙여보기
+        // TODO SDP 관련 문서 확인. jsep?
+        // TODO ICE 다시 확인
+        // TODO trickle??
+        // TODO Plugin
+        console.log("Creating offer ...!")
+        echotest.createOffer({
+            tracks: [
+                { type: 'audio', capture: true, recv: true},
+                { type: 'video', capture: true, recv: true},
+                { type: 'data' }
+            ],
+            success: (jsep) => {
+                Janus.debug("Got SDP", jsep)
+                echotest.send({
+                    message: body,
+                    jsep: jsep,
+                })
+            },
+            error: (error) => {
+                Janus.error("WebRTC error: ", error)
+            }
+        })
+    }
+
+    function onMessage(msg, jsep) {
+        // Plugin send message 에 대한 결과 수신
+        if (jsep) {
+            // 중요) 이게 없으면 ICE agent 가 안 만들어져서 커넥션이 끊어진다.
+            echotest.handleRemoteJsep(({ jsep }))
+        }
+    }
+
+    function onLocalTrack(track, on) {
+        if (!on)
+            return;
+
+        // 하울링을 막기 위해 local audio 는 무시한다
+        if (track.kind === 'audio')
+            return;
+
+        else {
+            // Play local track
+            const trackId = track.id.replace(/[{}]/g, "");
+            const stream = new MediaStream([track])
+            $('#videoleft').append('<video class="rounted centered" id="myvideo' + trackId + '" width="100%" height="100%" autoplay playsinline muted="muted"/>')
+            Janus.attachMediaStream($('#myvideo' + trackId).get(0), stream)
+        }
+
+        if (echotest.webrtcStuff.pc.iceConnectionState !== 'completed' &&
+            echotest.webrtcStuff.pc.iceConnectionState !== 'connected') {
+            console.log("Publishing ...")
+        }
+    }
+
+    function onRemoteTrack(track, mid, on, metadata) {
+        if (!on)
+            return
+
+        if (track.kind === 'audio')
+            return
+
+        const stream = new MediaStream([track])
+        $('#videoright').append('<video class="rounded centered" id="peervideo' + mid + '" width="100%" height="100%" autoplay playsinline/>')
+        Janus.attachMediaStream($('#peervideo' + mid).get(0), stream)
+    }
+
+</script>
+</html>
